@@ -1,0 +1,1384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Supply Mapping Analytics</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #f4f6fb;
+      --bg-2: #e9edf5;
+      --surface: #ffffff;
+      --surface-2: #f8fafc;
+      --border: #e2e8f0;
+      --border-strong: #cbd5e1;
+      --text: #0f172a;
+      --text-2: #334155;
+      --muted: #64748b;
+      --primary: #4f46e5;
+      --primary-dark: #4338ca;
+      --primary-soft: #eef2ff;
+      --cyan: #0891b2;
+      --cyan-soft: #ecfeff;
+      --green: #059669;
+      --green-soft: #ecfdf5;
+      --amber: #d97706;
+      --amber-soft: #fffbeb;
+      --red: #dc2626;
+      --red-soft: #fef2f2;
+      --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+      --shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+      --shadow-lg: 0 20px 50px rgba(15, 23, 42, 0.12);
+      --radius: 16px;
+      --radius-sm: 10px;
+      --nav-h: 64px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: "Inter", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+
+    .hidden { display: none !important; }
+
+    /* ── Navbar ── */
+    .navbar {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      height: var(--nav-h);
+      background: rgba(255, 255, 255, 0.92);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 1.5rem;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .brand-icon {
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, var(--primary), #7c3aed);
+      display: grid;
+      place-items: center;
+      color: white;
+      font-weight: 800;
+      font-size: 0.85rem;
+    }
+
+    .brand h1 {
+      font-size: 1.05rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .brand span {
+      display: block;
+      font-size: 0.72rem;
+      color: var(--muted);
+      font-weight: 500;
+    }
+
+    .nav-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+
+    .file-pill {
+      display: none;
+      align-items: center;
+      gap: 0.5rem;
+      background: var(--primary-soft);
+      color: var(--primary-dark);
+      padding: 0.4rem 0.85rem;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      max-width: 220px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .file-pill.visible { display: flex; }
+
+    button {
+      font-family: inherit;
+      border: none;
+      border-radius: var(--radius-sm);
+      padding: 0.6rem 1rem;
+      font-weight: 600;
+      font-size: 0.875rem;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    .btn-primary {
+      background: var(--primary);
+      color: white;
+      box-shadow: 0 4px 14px rgba(79, 70, 229, 0.35);
+    }
+
+    .btn-primary:not(:disabled):hover {
+      background: var(--primary-dark);
+      transform: translateY(-1px);
+    }
+
+    .btn-outline {
+      background: white;
+      color: var(--text-2);
+      border: 1px solid var(--border-strong);
+    }
+
+    .btn-outline:not(:disabled):hover { background: var(--surface-2); }
+
+    /* ── Layout ── */
+    .page { max-width: 1440px; margin: 0 auto; padding: 1.5rem; }
+
+    .hero-upload {
+      background: linear-gradient(135deg, #ffffff 0%, #f8faff 100%);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 2rem;
+      box-shadow: var(--shadow);
+      margin-bottom: 1.5rem;
+    }
+
+    .hero-upload.compact {
+      padding: 1rem 1.25rem;
+    }
+
+    .hero-upload.compact .dropzone { padding: 1rem; }
+
+    .hero-upload.compact .hero-text { display: none; }
+
+    .hero-text h2 {
+      font-size: 1.5rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      margin-bottom: 0.35rem;
+    }
+
+    .hero-text p { color: var(--muted); font-size: 0.95rem; max-width: 600px; }
+
+    .dropzone {
+      margin-top: 1.25rem;
+      border: 2px dashed var(--border-strong);
+      border-radius: 14px;
+      padding: 2.5rem 1.5rem;
+      text-align: center;
+      cursor: pointer;
+      background: var(--surface-2);
+      transition: all 0.2s;
+    }
+
+    .dropzone:hover, .dropzone.dragover {
+      border-color: var(--primary);
+      background: var(--primary-soft);
+    }
+
+    .dropzone-icon {
+      width: 52px;
+      height: 52px;
+      margin: 0 auto 1rem;
+      background: var(--primary-soft);
+      border-radius: 14px;
+      display: grid;
+      place-items: center;
+      font-size: 1.5rem;
+    }
+
+    .dropzone p { color: var(--text-2); font-weight: 500; }
+    .dropzone small { color: var(--muted); display: block; margin-top: 0.35rem; }
+
+    .upload-actions {
+      display: flex;
+      gap: 0.75rem;
+      margin-top: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .error-banner {
+      margin-top: 1rem;
+      padding: 0.85rem 1rem;
+      background: var(--red-soft);
+      border: 1px solid #fecaca;
+      color: var(--red);
+      border-radius: var(--radius-sm);
+      font-size: 0.875rem;
+      font-weight: 500;
+    }
+
+    .loading-overlay {
+      text-align: center;
+      padding: 3rem 1rem;
+    }
+
+    .loader {
+      width: 44px;
+      height: 44px;
+      border: 3px solid var(--border);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      margin: 0 auto 1rem;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .fade-up { animation: fadeUp 0.4s ease forwards; }
+
+    /* ── Section headers ── */
+    .section {
+      margin-bottom: 1.5rem;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1rem;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .section-header h3 {
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .section-header p {
+      font-size: 0.85rem;
+      color: var(--muted);
+      width: 100%;
+    }
+
+    .section-tag {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--primary);
+      background: var(--primary-soft);
+      padding: 0.25rem 0.6rem;
+      border-radius: 6px;
+    }
+
+    /* ── KPI Cards ── */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    @media (max-width: 1100px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 560px) { .kpi-grid { grid-template-columns: 1fr; } }
+
+    .kpi-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.15rem 1.25rem;
+      box-shadow: var(--shadow-sm);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .kpi-card::before {
+      content: "";
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      background: var(--accent, var(--primary));
+    }
+
+    .kpi-card.accent-indigo { --accent: #4f46e5; }
+    .kpi-card.accent-cyan { --accent: #0891b2; }
+    .kpi-card.accent-green { --accent: #059669; }
+    .kpi-card.accent-amber { --accent: #d97706; }
+    .kpi-card.accent-violet { --accent: #7c3aed; }
+    .kpi-card.accent-rose { --accent: #e11d48; }
+
+    .kpi-label {
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 0.4rem;
+    }
+
+    .kpi-value {
+      font-size: 1.85rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      font-family: "IBM Plex Mono", monospace;
+      line-height: 1.1;
+    }
+
+    .kpi-sub {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-top: 0.35rem;
+    }
+
+    .kpi-sub strong { color: var(--text-2); }
+
+    /* ── Funnel ── */
+    .funnel-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .funnel-steps {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.75rem;
+      margin-top: 1rem;
+    }
+
+    @media (max-width: 768px) {
+      .funnel-steps { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    .funnel-step {
+      text-align: center;
+      padding: 1rem 0.5rem;
+      border-radius: 12px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      position: relative;
+    }
+
+    .funnel-step:not(:last-child)::after {
+      content: "→";
+      position: absolute;
+      right: -0.55rem;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--muted);
+      font-weight: 700;
+      z-index: 1;
+    }
+
+    @media (max-width: 768px) {
+      .funnel-step:nth-child(2)::after,
+      .funnel-step:nth-child(4)::after { display: none; }
+    }
+
+    .funnel-step .step-label {
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .funnel-step .step-count {
+      font-size: 1.6rem;
+      font-weight: 800;
+      font-family: "IBM Plex Mono", monospace;
+      margin: 0.25rem 0;
+    }
+
+    .funnel-step .step-pct {
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--primary);
+    }
+
+    .funnel-bar-wrap {
+      margin-top: 1.25rem;
+      height: 10px;
+      background: var(--bg-2);
+      border-radius: 999px;
+      overflow: hidden;
+      display: flex;
+    }
+
+    .funnel-bar {
+      height: 100%;
+      transition: width 0.6s ease;
+    }
+
+    /* ── Charts ── */
+    .charts-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+
+    @media (max-width: 960px) { .charts-grid { grid-template-columns: 1fr; } }
+
+    .chart-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.25rem;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .chart-card h4 {
+      font-size: 0.95rem;
+      font-weight: 700;
+      margin-bottom: 0.25rem;
+    }
+
+    .chart-card p {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-bottom: 1rem;
+    }
+
+    .chart-container {
+      position: relative;
+      height: 300px;
+    }
+
+    .chart-container.tall { height: 340px; }
+
+    /* ── Compare panel ── */
+    .compare-panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.25rem;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .compare-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: center;
+      margin-bottom: 1.25rem;
+    }
+
+    .compare-controls label {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--text-2);
+    }
+
+    .sourcer-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .chip {
+      padding: 0.4rem 0.85rem;
+      border-radius: 999px;
+      border: 1.5px solid var(--border-strong);
+      background: white;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-2);
+      cursor: pointer;
+      transition: all 0.15s;
+      user-select: none;
+    }
+
+    .chip:hover { border-color: var(--primary); color: var(--primary); }
+
+    .chip.selected {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: white;
+    }
+
+    .compare-table-wrap {
+      overflow: auto;
+    }
+
+    .compare-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+
+    .compare-table th,
+    .compare-table td {
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--border);
+      text-align: center;
+    }
+
+    .compare-table th:first-child,
+    .compare-table td:first-child {
+      text-align: left;
+      font-weight: 600;
+      color: var(--muted);
+      background: var(--surface-2);
+      position: sticky;
+      left: 0;
+    }
+
+    .compare-table thead th {
+      background: var(--primary-soft);
+      color: var(--primary-dark);
+      font-weight: 700;
+    }
+
+    .compare-table .best {
+      background: var(--green-soft);
+      color: var(--green);
+      font-weight: 700;
+    }
+
+    .compare-table .worst {
+      background: var(--red-soft);
+      color: var(--red);
+    }
+
+    /* ── Tabs & Tables ── */
+    .tabs-bar {
+      display: flex;
+      gap: 0.35rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 0.35rem;
+      margin-bottom: 1rem;
+      overflow-x: auto;
+    }
+
+    .tab-btn {
+      padding: 0.55rem 1rem;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 0.82rem;
+      white-space: nowrap;
+      border: none;
+    }
+
+    .tab-btn.active {
+      background: var(--primary);
+      color: white;
+      box-shadow: 0 2px 8px rgba(79, 70, 229, 0.3);
+    }
+
+    .table-toolbar {
+      display: flex;
+      gap: 0.75rem;
+      margin-bottom: 0.75rem;
+      flex-wrap: wrap;
+    }
+
+    .search-input {
+      flex: 1;
+      min-width: 200px;
+      padding: 0.6rem 0.9rem;
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-sm);
+      font-family: inherit;
+      font-size: 0.875rem;
+      outline: none;
+    }
+
+    .search-input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12);
+    }
+
+    .data-panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .table-wrap {
+      overflow: auto;
+      max-height: 480px;
+    }
+
+    table.data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+    }
+
+    table.data-table th,
+    table.data-table td {
+      padding: 0.65rem 0.85rem;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      white-space: nowrap;
+    }
+
+    table.data-table th {
+      position: sticky;
+      top: 0;
+      background: #f1f5f9;
+      color: var(--muted);
+      font-weight: 700;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      z-index: 1;
+    }
+
+    table.data-table tbody tr:hover td { background: #f8fafc; }
+
+    .badge {
+      display: inline-block;
+      padding: 0.15rem 0.55rem;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 700;
+    }
+
+    .badge-imputed { background: var(--amber-soft); color: var(--amber); }
+    .badge-actual { background: var(--green-soft); color: var(--green); }
+    .badge-corrected { background: var(--cyan-soft); color: var(--cyan); }
+
+    /* ── Assumptions ── */
+    .assumptions-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .assumptions-toggle {
+      width: 100%;
+      padding: 1rem 1.25rem;
+      background: var(--surface-2);
+      border: none;
+      text-align: left;
+      font-weight: 700;
+      font-size: 0.9rem;
+      color: var(--text);
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .assumptions-body {
+      padding: 1rem 1.25rem 1.25rem;
+      display: none;
+    }
+
+    .assumptions-body.open { display: block; }
+
+    .assumptions-body ol {
+      padding-left: 1.25rem;
+      color: var(--text-2);
+      font-size: 0.85rem;
+    }
+
+    .assumptions-body li { margin-bottom: 0.4rem; }
+
+    .status-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+    }
+
+    .status-pill {
+      padding: 0.35rem 0.75rem;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--text-2);
+    }
+
+    .status-pill span {
+      color: var(--primary);
+      font-family: "IBM Plex Mono", monospace;
+    }
+  </style>
+</head>
+<body>
+
+  <nav class="navbar">
+    <div class="brand">
+      <div class="brand-icon">SM</div>
+      <div>
+        <h1>Supply Mapping Analytics</h1>
+        <span>Recruitment Pipeline Intelligence</span>
+      </div>
+    </div>
+    <div class="nav-actions">
+      <div class="file-pill" id="navFilePill"></div>
+      <button class="btn-outline hidden" id="navUploadBtn">Change File</button>
+      <button class="btn-outline" id="downloadBtn" disabled>Export Excel</button>
+      <button class="btn-primary" id="analyzeBtn" disabled>Run Analysis</button>
+    </div>
+  </nav>
+
+  <main class="page">
+    <section class="hero-upload" id="uploadSection">
+      <div class="hero-text">
+        <h2>Upload & Analyze Recruitment Pipeline</h2>
+        <p>Fix dates, fill missing round timelines, compare sourcer performance, and track conversion rates across R0 → R1 → R2 → Offer stages.</p>
+      </div>
+      <div class="dropzone" id="dropzone">
+        <div class="dropzone-icon">📊</div>
+        <p>Drop your Excel file here or click to browse</p>
+        <small>Supports .xlsx — e.g. Supply Mapping.xlsx</small>
+        <input type="file" id="fileInput" accept=".xlsx,.xls" class="hidden" />
+      </div>
+      <div class="upload-actions">
+        <button class="btn-primary" id="analyzeBtn2" disabled>Analyze Pipeline</button>
+      </div>
+      <div id="errorBox" class="error-banner hidden"></div>
+    </section>
+
+    <div id="loading" class="loading-overlay hidden">
+      <div class="loader"></div>
+      <p style="color: var(--muted); font-weight: 500;">Processing pipeline data…</p>
+    </div>
+
+    <div id="dashboard" class="hidden">
+
+      <!-- KPI Overview -->
+      <section class="section fade-up">
+        <div class="section-header">
+          <div>
+            <span class="section-tag">Executive Summary</span>
+            <h3 style="margin-top:0.4rem">Pipeline Overview</h3>
+            <p>All key metrics at a glance — volume, conversion, speed, and data quality</p>
+          </div>
+        </div>
+
+        <div class="kpi-grid" id="kpiPipeline"></div>
+        <div class="kpi-grid" id="kpiConversion"></div>
+        <div class="kpi-grid" id="kpiSpeed"></div>
+        <div class="kpi-grid" id="kpiQuality"></div>
+      </section>
+
+      <!-- Funnel -->
+      <section class="section fade-up">
+        <div class="funnel-card">
+          <div class="section-header" style="margin-bottom:0">
+            <div>
+              <h3>Recruitment Funnel</h3>
+              <p>Candidate flow from application (R0) through interview rounds to offer</p>
+            </div>
+          </div>
+          <div class="funnel-steps" id="funnelSteps"></div>
+          <div class="funnel-bar-wrap" id="funnelBar"></div>
+        </div>
+      </section>
+
+      <!-- Charts -->
+      <section class="section fade-up">
+        <div class="section-header">
+          <h3>Visual Analytics</h3>
+          <p>Compare sourcer volume, conversion rates, and processing speed</p>
+        </div>
+        <div class="charts-grid">
+          <div class="chart-card">
+            <h4>Sourcer Volume vs Conversion</h4>
+            <p>Submitted candidates (bars) and overall offer conversion % (line)</p>
+            <div class="chart-container tall"><canvas id="chartVolume"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <h4>Stage-wise Conversion by Sourcer</h4>
+            <p>R0→R1 and R1→R2 conversion percentages compared</p>
+            <div class="chart-container tall"><canvas id="chartConversion"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <h4>Processing Speed (Days)</h4>
+            <p>Average days between rounds — lower is faster</p>
+            <div class="chart-container"><canvas id="chartSpeed"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <h4>Final Status Distribution</h4>
+            <p>Breakdown of all candidate outcomes</p>
+            <div class="chart-container"><canvas id="chartStatus"></canvas></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Sourcer Compare -->
+      <section class="section fade-up">
+        <div class="compare-panel">
+          <div class="section-header" style="margin-bottom:0.75rem">
+            <div>
+              <h3>Sourcer Comparison</h3>
+              <p>Select up to 4 sourcers to compare side-by-side — best values highlighted in green</p>
+            </div>
+          </div>
+          <div class="compare-controls">
+            <label>Compare:</label>
+            <div class="sourcer-chips" id="sourcerChips"></div>
+          </div>
+          <div class="compare-table-wrap" id="compareTableWrap">
+            <p style="color:var(--muted);padding:1rem">Select sourcers above to compare</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Status pills -->
+      <section class="section fade-up">
+        <div class="section-header">
+          <h3>Status Breakdown</h3>
+        </div>
+        <div class="status-pills" id="statusPills"></div>
+      </section>
+
+      <!-- Data Tables -->
+      <section class="section fade-up">
+        <div class="section-header">
+          <h3>Detailed Data</h3>
+          <p>Searchable tables — export full data via Excel button above</p>
+        </div>
+        <div class="tabs-bar" id="tabsBar">
+          <button class="tab-btn active" data-tab="summary">Summary</button>
+          <button class="tab-btn" data-tab="sourcer">Sourcer Performance</button>
+          <button class="tab-btn" data-tab="skills">Sourcer × Skills</button>
+          <button class="tab-btn" data-tab="designation">Designation × Exp</button>
+          <button class="tab-btn" data-tab="preview">R1/R2 Timeline</button>
+        </div>
+        <div class="table-toolbar">
+          <input type="text" class="search-input" id="tableSearch" placeholder="Search in table…" />
+        </div>
+        <div class="data-panel">
+          <div class="table-wrap" id="tableWrap"></div>
+        </div>
+      </section>
+
+      <!-- Assumptions -->
+      <section class="section fade-up">
+        <div class="assumptions-card">
+          <button class="assumptions-toggle" id="assumptionsToggle">
+            Methodology & Assumptions
+            <span id="assumptionsArrow">▼</span>
+          </button>
+          <div class="assumptions-body" id="assumptionsBody">
+            <ol id="assumptionsList"></ol>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const dropzone = $("dropzone");
+    const fileInput = $("fileInput");
+    const analyzeBtn = $("analyzeBtn");
+    const analyzeBtn2 = $("analyzeBtn2");
+    const downloadBtn = $("downloadBtn");
+    const navUploadBtn = $("navUploadBtn");
+    const errorBox = $("errorBox");
+    const loading = $("loading");
+    const dashboard = $("dashboard");
+    const uploadSection = $("uploadSection");
+    const navFilePill = $("navFilePill");
+    const tableWrap = $("tableWrap");
+    const tabsBar = $("tabsBar");
+    const tableSearch = $("tableSearch");
+
+    let selectedFile = null;
+    let analysisData = null;
+    let activeTab = "summary";
+    let chartInstances = [];
+    let selectedSourcers = [];
+
+    const CHART_COLORS = [
+      "#4f46e5", "#0891b2", "#059669", "#d97706", "#e11d48",
+      "#7c3aed", "#0d9488", "#ca8a04", "#db2777", "#2563eb",
+      "#65a30d", "#ea580c"
+    ];
+
+    function setFile(file) {
+      if (!file) return;
+      selectedFile = file;
+      navFilePill.textContent = file.name;
+      navFilePill.classList.add("visible");
+      analyzeBtn.disabled = false;
+      analyzeBtn2.disabled = false;
+      downloadBtn.disabled = false;
+      navUploadBtn.classList.remove("hidden");
+      errorBox.classList.add("hidden");
+    }
+
+    function showError(msg) {
+      errorBox.textContent = msg;
+      errorBox.classList.remove("hidden");
+    }
+
+    dropzone.addEventListener("click", () => fileInput.click());
+    navUploadBtn.addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", (e) => setFile(e.target.files[0]));
+
+    ["dragenter", "dragover"].forEach((evt) => {
+      dropzone.addEventListener(evt, (e) => {
+        e.preventDefault();
+        dropzone.classList.add("dragover");
+      });
+    });
+    ["dragleave", "drop"].forEach((evt) => {
+      dropzone.addEventListener(evt, (e) => {
+        e.preventDefault();
+        dropzone.classList.remove("dragover");
+      });
+    });
+    dropzone.addEventListener("drop", (e) => setFile(e.dataTransfer.files[0]));
+
+    function kpiCard(label, value, sub, accent) {
+      return `<div class="kpi-card accent-${accent}">
+        <div class="kpi-label">${label}</div>
+        <div class="kpi-value">${value ?? "—"}</div>
+        ${sub ? `<div class="kpi-sub">${sub}</div>` : ""}
+      </div>`;
+    }
+
+    function renderKPIs(stats) {
+      $("kpiPipeline").innerHTML = [
+        kpiCard("Total Candidates", stats.total_candidates, "Applications received (R0)", "indigo"),
+        kpiCard("Reached R1", stats.reached_r1, `${stats.r0_r1_conversion}% of total`, "cyan"),
+        kpiCard("Reached R2", stats.reached_r2, `${stats.r1_r2_conversion}% from R1`, "violet"),
+        kpiCard("Offer Stage", stats.reached_offer, `${stats.overall_conversion}% overall conversion`, "green"),
+      ].join("");
+
+      $("kpiConversion").innerHTML = [
+        kpiCard("R0 → R1", stats.r0_r1_conversion + "%", "Screening to Round 1", "indigo"),
+        kpiCard("R1 → R2", stats.r1_r2_conversion + "%", "Round 1 to Round 2", "cyan"),
+        kpiCard("R2 → Offer", stats.r2_offer_conversion + "%", "Round 2 to Offer", "green"),
+        kpiCard("End-to-End", stats.overall_conversion + "%", "R0 to Offer conversion", "amber"),
+      ].join("");
+
+      $("kpiSpeed").innerHTML = [
+        kpiCard("Avg R0→R1", stats.avg_r0_r1 != null ? stats.avg_r0_r1 + "d" : "—", `Median: ${stats.median_r0_r1 ?? "—"} days`, "indigo"),
+        kpiCard("Avg R1→R2", stats.avg_r1_r2 != null ? stats.avg_r1_r2 + "d" : "—", `Median: ${stats.median_r1_r2 ?? "—"} days`, "cyan"),
+        kpiCard("R1 Actual Dates", stats.r1_actual, "From source data", "green"),
+        kpiCard("R2 Actual Dates", stats.r2_actual, "From source data", "violet"),
+      ].join("");
+
+      $("kpiQuality").innerHTML = [
+        kpiCard("High Confidence", stats.data_confidence_high ?? "—", "All dates from source", "green"),
+        kpiCard("Estimated", stats.data_confidence_estimated ?? "—", "Imputed or adjusted dates", "amber"),
+        kpiCard("R1 Imputed", stats.r1_imputed, "Filled from similar candidates", "amber"),
+        kpiCard("R2 Imputed", stats.r2_imputed, "Filled from similar candidates", "amber"),
+      ].join("");
+    }
+
+    function renderFunnel(charts) {
+      const f = charts.funnel;
+      const colors = ["#4f46e5", "#0891b2", "#7c3aed", "#059669"];
+      $("funnelSteps").innerHTML = f.labels.map((label, i) => `
+        <div class="funnel-step">
+          <div class="step-label">${label}</div>
+          <div class="step-count">${f.counts[i].toLocaleString()}</div>
+          <div class="step-pct">${f.percentages[i]}% of pipeline</div>
+        </div>
+      `).join("");
+
+      $("funnelBar").innerHTML = f.percentages.map((pct, i) =>
+        `<div class="funnel-bar" style="width:${pct}%;background:${colors[i]}"></div>`
+      ).join("");
+    }
+
+    function destroyCharts() {
+      chartInstances.forEach((c) => c.destroy());
+      chartInstances = [];
+    }
+
+    function renderCharts(charts, statusDist) {
+      destroyCharts();
+      const s = charts.sourcers;
+      const labels = s.labels;
+
+      chartInstances.push(new Chart($("chartVolume"), {
+        type: "bar",
+        data: {
+          labels,
+          datasets: [
+            {
+              label: "Submitted",
+              data: s.volume,
+              backgroundColor: "rgba(79, 70, 229, 0.7)",
+              borderRadius: 6,
+              yAxisID: "y",
+            },
+            {
+              label: "Overall Conversion %",
+              data: s.overall_conversion,
+              type: "line",
+              borderColor: "#059669",
+              backgroundColor: "#059669",
+              tension: 0.3,
+              yAxisID: "y1",
+              pointRadius: 4,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { position: "bottom" } },
+          scales: {
+            y: { beginAtZero: true, title: { display: true, text: "Count" } },
+            y1: {
+              position: "right",
+              beginAtZero: true,
+              max: 100,
+              grid: { drawOnChartArea: false },
+              title: { display: true, text: "Conversion %" },
+            },
+          },
+        },
+      }));
+
+      chartInstances.push(new Chart($("chartConversion"), {
+        type: "bar",
+        data: {
+          labels,
+          datasets: [
+            {
+              label: "R0→R1 %",
+              data: s.r0_r1_conversion,
+              backgroundColor: "rgba(8, 145, 178, 0.75)",
+              borderRadius: 4,
+            },
+            {
+              label: "R1→R2 %",
+              data: s.r1_r2_conversion,
+              backgroundColor: "rgba(124, 58, 237, 0.75)",
+              borderRadius: 4,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { position: "bottom" } },
+          scales: {
+            y: { beginAtZero: true, max: 100, title: { display: true, text: "Conversion %" } },
+          },
+        },
+      }));
+
+      chartInstances.push(new Chart($("chartSpeed"), {
+        type: "bar",
+        data: {
+          labels,
+          datasets: [
+            {
+              label: "Avg R0→R1 (days)",
+              data: s.avg_r0_r1,
+              backgroundColor: "rgba(79, 70, 229, 0.85)",
+              borderRadius: 4,
+              barPercentage: 0.72,
+              categoryPercentage: 0.8,
+            },
+            {
+              label: "Avg R1→R2 (days)",
+              data: s.avg_r1_r2,
+              backgroundColor: "rgba(217, 119, 6, 0.9)",
+              borderRadius: 4,
+              barPercentage: 0.72,
+              categoryPercentage: 0.8,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          indexAxis: "y",
+          plugins: {
+            legend: { position: "bottom" },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => {
+                  const v = ctx.parsed.x;
+                  return `${ctx.dataset.label}: ${v == null ? "No R2 data" : v + " days"}`;
+                },
+              },
+            },
+          },
+          scales: {
+            x: {
+              beginAtZero: true,
+              title: { display: true, text: "Average days" },
+              ticks: { stepSize: 1 },
+            },
+          },
+        },
+      }));
+
+      const statusLabels = statusDist.map((x) => x.status);
+      const statusCounts = statusDist.map((x) => x.count);
+      chartInstances.push(new Chart($("chartStatus"), {
+        type: "doughnut",
+        data: {
+          labels: statusLabels,
+          datasets: [{
+            data: statusCounts,
+            backgroundColor: CHART_COLORS.slice(0, statusLabels.length),
+            borderWidth: 2,
+            borderColor: "#fff",
+          }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { position: "right", labels: { boxWidth: 12, font: { size: 11 } } },
+          },
+        },
+      }));
+    }
+
+    function renderStatusPills(statusDist) {
+      $("statusPills").innerHTML = statusDist.map((x) =>
+        `<div class="status-pill">${x.status}: <span>${x.count}</span></div>`
+      ).join("");
+    }
+
+    function renderSourcerChips(sourcers) {
+      const chips = $("sourcerChips");
+      chips.innerHTML = sourcers.map((name) =>
+        `<div class="chip" data-sourcer="${name}">${name}</div>`
+      ).join("");
+
+      chips.querySelectorAll(".chip").forEach((chip) => {
+        chip.addEventListener("click", () => {
+          const name = chip.dataset.sourcer;
+          if (chip.classList.contains("selected")) {
+            chip.classList.remove("selected");
+            selectedSourcers = selectedSourcers.filter((s) => s !== name);
+          } else if (selectedSourcers.length < 4) {
+            chip.classList.add("selected");
+            selectedSourcers.push(name);
+          }
+          renderCompareTable();
+        });
+      });
+
+      // Auto-select top 3 by volume
+      selectedSourcers = sourcers.slice(0, 3);
+      chips.querySelectorAll(".chip").forEach((chip) => {
+        if (selectedSourcers.includes(chip.dataset.sourcer)) {
+          chip.classList.add("selected");
+        }
+      });
+      renderCompareTable();
+    }
+
+    function renderCompareTable() {
+      const wrap = $("compareTableWrap");
+      if (!selectedSourcers.length || !analysisData) {
+        wrap.innerHTML = `<p style="color:var(--muted);padding:1rem">Select sourcers above to compare</p>`;
+        return;
+      }
+
+      const data = analysisData.sourcer_summary.filter((r) =>
+        selectedSourcers.includes(r.Sourcer)
+      );
+
+      const metrics = [
+        { key: "Total Submitted", label: "Total Submitted", higher: true },
+        { key: "Reached R1", label: "Reached R1", higher: true },
+        { key: "Reached R2", label: "Reached R2", higher: true },
+        { key: "Offer Stage", label: "Offer Stage", higher: true },
+        { key: "R0\u2192R1 Conversion %", label: "R0\u2192R1 Conversion %", higher: true },
+        { key: "R1\u2192R2 Conversion %", label: "R1\u2192R2 Conversion %", higher: true },
+        { key: "Overall Conversion %", label: "Overall Conversion %", higher: true },
+        { key: "Avg Days R0\u2192R1", label: "Avg Days R0\u2192R1", higher: false },
+        { key: "Avg Days R1\u2192R2", label: "Avg Days R1\u2192R2", higher: false },
+      ];
+
+      const resolveKey = (row, pattern) => {
+        if (row[pattern] !== undefined) return pattern;
+        return Object.keys(row).find((k) => k.includes(pattern.split(" ")[0])) || pattern;
+      };
+
+      const header = `<tr><th>Metric</th>${data.map((r) => `<th>${r.Sourcer}</th>`).join("")}</tr>`;
+
+      const rows = metrics.map((m) => {
+        const values = data.map((r) => {
+          const key = resolveKey(r, m.key);
+          const v = r[key];
+          return v === null || v === undefined ? null : Number(v);
+        });
+
+        const valid = values.filter((v) => v !== null && !isNaN(v));
+        const best = valid.length ? (m.higher ? Math.max(...valid) : Math.min(...valid)) : null;
+        const worst = valid.length ? (m.higher ? Math.min(...valid) : Math.max(...valid)) : null;
+
+        const cells = values.map((v) => {
+          let cls = "";
+          if (v !== null && best !== null && v === best && valid.length > 1) cls = "best";
+          else if (v !== null && worst !== null && v === worst && valid.length > 1 && best !== worst) cls = "worst";
+          const display = v === null || isNaN(v) ? "—" : (m.key.includes("%") ? v + "%" : v);
+          return `<td class="${cls}">${display}</td>`;
+        });
+
+        return `<tr><td>${m.label}</td>${cells.join("")}</tr>`;
+      }).join("");
+
+      wrap.innerHTML = `<table class="compare-table"><thead>${header}</thead><tbody>${rows}</tbody></table>`;
+    }
+
+    function renderTable(rows) {
+      if (!rows || !rows.length) {
+        tableWrap.innerHTML = `<p style="padding:1.25rem;color:var(--muted)">No data available</p>`;
+        return;
+      }
+
+      const query = tableSearch.value.toLowerCase();
+      const filtered = query
+        ? rows.filter((row) => JSON.stringify(row).toLowerCase().includes(query))
+        : rows;
+
+      const cols = Object.keys(rows[0]);
+      const header = cols.map((c) => `<th>${c}</th>`).join("");
+      const body = filtered.map((row) => {
+        const cells = cols.map((c) => {
+          let val = row[c];
+          if (val === null || val === undefined) val = "";
+          if (String(c).includes("Source") && val) {
+            const cls = val === "Imputed" ? "badge-imputed" : val === "Corrected" ? "badge-corrected" : "badge-actual";
+            return `<td><span class="badge ${cls}">${val}</span></td>`;
+          }
+          if (String(c).includes("Imputation Method") && val) {
+            return `<td><span class="badge badge-imputed">${val}</span></td>`;
+          }
+          return `<td>${val}</td>`;
+        }).join("");
+        return `<tr>${cells}</tr>`;
+      }).join("");
+
+      tableWrap.innerHTML = `<table class="data-table"><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table>`;
+    }
+
+    function getTabData(tab) {
+      const map = {
+        summary: analysisData.summary,
+        sourcer: analysisData.sourcer_summary,
+        skills: analysisData.sourcer_breakdown,
+        designation: analysisData.designation_breakdown,
+        preview: analysisData.processed_preview,
+      };
+      return map[tab] || [];
+    }
+
+    tabsBar.addEventListener("click", (e) => {
+      if (!e.target.classList.contains("tab-btn") || !analysisData) return;
+      document.querySelectorAll(".tab-btn").forEach((t) => t.classList.remove("active"));
+      e.target.classList.add("active");
+      activeTab = e.target.dataset.tab;
+      renderTable(getTabData(activeTab));
+    });
+
+    tableSearch.addEventListener("input", () => {
+      if (analysisData) renderTable(getTabData(activeTab));
+    });
+
+    $("assumptionsToggle").addEventListener("click", () => {
+      $("assumptionsBody").classList.toggle("open");
+      $("assumptionsArrow").textContent = $("assumptionsBody").classList.contains("open") ? "▲" : "▼";
+    });
+
+    async function runAnalysis() {
+      if (!selectedFile) return;
+
+      const formData = new FormData();
+      formData.append("file", selectedFile);
+
+      loading.classList.remove("hidden");
+      dashboard.classList.add("hidden");
+      errorBox.classList.add("hidden");
+
+      try {
+        const res = await fetch("/api/analyze", { method: "POST", body: formData });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Analysis failed");
+
+        analysisData = data;
+        uploadSection.classList.add("compact");
+
+        renderKPIs(data.stats);
+        renderFunnel(data.charts);
+        renderCharts(data.charts, data.status_distribution);
+        renderStatusPills(data.status_distribution);
+        renderSourcerChips(data.charts.sourcers.labels);
+        $("assumptionsList").innerHTML = data.assumptions.map((a) => `<li>${a}</li>`).join("");
+
+        activeTab = "summary";
+        document.querySelectorAll(".tab-btn").forEach((t) => t.classList.remove("active"));
+        document.querySelector('.tab-btn[data-tab="summary"]').classList.add("active");
+        renderTable(data.summary);
+
+        dashboard.classList.remove("hidden");
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      } catch (err) {
+        showError(err.message);
+      } finally {
+        loading.classList.add("hidden");
+      }
+    }
+
+    analyzeBtn.addEventListener("click", runAnalysis);
+    analyzeBtn2.addEventListener("click", runAnalysis);
+
+    downloadBtn.addEventListener("click", async () => {
+      if (!selectedFile) return;
+      const formData = new FormData();
+      formData.append("file", selectedFile);
+      try {
+        const res = await fetch("/api/download", { method: "POST", body: formData });
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.error || "Download failed");
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "Supply_Mapping_Analyzed.xlsx";
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        showError(err.message);
+      }
+    });
+  </script>
+</body>
+</html>
