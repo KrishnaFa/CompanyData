@@ -34,23 +34,48 @@ Analyze **Supply Mapping** Excel data: stage timing (R0→R1→R2→Offer), bott
 
 - **Python 3.9+**
 - **Power BI Desktop** (free from Microsoft)
-- Input file: **Supply Mapping.xlsx** (same format as current HR file)
+- Input file: **Any `.xlsx` file** with the same column headers as Supply Mapping (see below)
 
-### Install Python packages (one time)
+---
+
+## Any xlsx file works (same format)
+
+You can upload **any Excel file** — the name does not matter. Examples:
+
+- `Supply Mapping.xlsx`
+- `March_2026_Candidates.xlsx`
+- `New_Data.xlsx`
+
+**Required columns** (must match Supply Mapping headers):
+
+`Date of submission`, `Sourcer`, `Skills`, `Name`, `Final Status`, `R1 Date`, `R2 Date`, `Current Designation`, `Total Exp`
+
+If columns are missing, the script shows a clear error listing what was found.
+
+### Where to put your file
+
+| Location | Behavior |
+|----------|----------|
+| **`uploads/` folder** | Recommended — drop any new `.xlsx` here (newest file is used first) |
+| **Project folder** | Also works — newest `.xlsx` is picked automatically |
+| **Any path** | Pass the full path: `python3 export_powerbi.py "path/to/your_file.xlsx"` |
+| **Drag onto `run.bat`** (Windows) | Drops the file path automatically |
+
+Output files (`Supply_Mapping_PowerBI_Ready.xlsx`, etc.) are **never** used as input.
+
+---
 
 ```bash
 cd /path/to/CompanyData
 python3 -m pip install -r requirements.txt
 ```
 
----
-
-## How to run
+### Install Python packages (one time)
 
 ### Option A — Windows (easiest)
 
-1. Put the new **Supply Mapping.xlsx** in this folder.
-2. Double-click **`run.bat`**.
+1. Drop your **any-name.xlsx** into the **`uploads/`** folder (or project folder).
+2. Double-click **`run.bat`** — or drag your `.xlsx` onto `run.bat`.
 3. Wait for **"POWER BI EXPORT COMPLETE"**.
 
 ### Option B — Mac / Linux / terminal
@@ -223,7 +248,8 @@ Expected result: **ALL CHECKS PASSED - READY FOR HR REVIEW**
 
 ```
 CompanyData/
-├── Supply Mapping.xlsx              ← Input (HR upload)
+├── uploads/                         ← Drop ANY new .xlsx here (recommended)
+├── Supply Mapping.xlsx              ← Example input (any name works)
 ├── export_powerbi.py                ← Main script — run this
 ├── run.bat                          ← Windows double-click runner
 ├── analyzer.py                      ← Core analytics engine

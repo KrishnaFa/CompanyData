@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Generate Power BI-ready Excel and CSV pack from Supply Mapping data.
-No HTML or web server required — use this file for your manager's Power BI workflow.
+Generate Power BI-ready Excel and CSV pack from any Supply Mapping-format .xlsx file.
+No HTML or web server required.
 """
 
 from __future__ import annotations
@@ -10,22 +10,26 @@ import argparse
 import sys
 from pathlib import Path
 
-from analyzer import analyze_file_path
+from analyzer import analyze_file_path, resolve_input_xlsx
 
-DEFAULT_INPUT = Path(__file__).parent / "Supply Mapping.xlsx"
 DEFAULT_EXCEL = Path(__file__).parent / "Supply_Mapping_PowerBI_Ready.xlsx"
 DEFAULT_ZIP = Path(__file__).parent / "Recruitment_PowerBI_DataPack.zip"
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Export recruitment analytics for Power BI (no HTML dashboard needed)."
+        description=(
+            "Export recruitment analytics for Power BI from ANY Supply Mapping-format .xlsx file."
+        )
     )
     parser.add_argument(
         "input",
         nargs="?",
-        default=str(DEFAULT_INPUT),
-        help="Path to Supply Mapping.xlsx (default: ./Supply Mapping.xlsx)",
+        default=None,
+        help=(
+            "Path to any .xlsx file (Supply Mapping format). "
+            "If omitted: uses newest file in uploads/ or project folder."
+        ),
     )
     parser.add_argument(
         "--excel",
@@ -39,13 +43,22 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    input_path = Path(args.input)
-    if not input_path.exists():
-        print(f"ERROR: Input file not found: {input_path}")
+    try:
+        input_path = resolve_input_xlsx(args.input)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"ERROR: {exc}")
         return 1
 
-    print(f"Analyzing {input_path.name}...")
-    result = analyze_file_path(str(input_path))
+    print(f"Analyzing: {input_path.name}")
+    print(f"Full path: {input_path}")
+    try:
+        result = analyze_file_path(str(input_path))
+    except ValueError as exc:
+        print(f"ERROR: {exc}")
+        return 1
+    except Exception as exc:
+        print(f"ERROR: Failed to analyze file: {exc}")
+        return 1
 
     excel_path = Path(args.excel)
     zip_path = Path(args.zip)
@@ -65,6 +78,7 @@ def main() -> int:
     print("=" * 56)
     print("POWER BI EXPORT COMPLETE")
     print("=" * 56)
+    print(f"Input : {input_path.name}")
     print(f"Excel : {excel_path}")
     print(f"CSV   : {zip_path}")
     print()
@@ -73,12 +87,8 @@ def main() -> int:
     print(f"Slow movers 30+ : {slow}")
     print(f"Main bottleneck : {primary_round}")
     print()
-    print("NEXT STEPS FOR POWER BI:")
-    print("  1. Open Power BI Desktop")
-    print("  2. Get Data → Excel → select the Excel file above")
-    print("  3. Load all PBI_* sheets")
-    print("  4. Open sheet PBI_Dashboard_Layout — build visuals page by page")
-    print("  5. Relate PBI_Stage_Transitions[Candidate Key] → PBI_Candidates[Candidate Key]")
+    print("Works with ANY .xlsx that has Supply Mapping columns.")
+    print("New file next time? Re-run this script — Power BI Refresh updates all charts.")
     print()
     return 0
 

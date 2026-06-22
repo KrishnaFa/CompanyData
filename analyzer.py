@@ -8,6 +8,7 @@ from __future__ import annotations
 import io
 import re
 from datetime import date, datetime, time
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -63,7 +64,7 @@ STAGE_TRANSITIONS = (
 )
 
 POWERBI_INSTRUCTIONS = [
-    "STEP 1 — Generate data: run  python export_powerbi.py  (uses Supply Mapping.xlsx). No HTML/website needed.",
+    "STEP 1 — Generate data: run python export_powerbi.py with ANY Supply Mapping-format .xlsx (uploads/ folder or pass file path).",
     "STEP 2 — Open Power BI Desktop → Get Data → Excel → select Supply_Mapping_PowerBI_Ready.xlsx.",
     "STEP 3 — Load ALL sheets starting with PBI_ (check every PBI_ table). Click Load (not Transform unless you want to hide unused columns).",
     "STEP 4 — Model view: create relationship PBI_Stage_Transitions[Candidate Key] → PBI_Candidates[Candidate Key] (Many-to-one, single direction).",
@@ -437,6 +438,103 @@ PREVIEW_COLUMNS = [
     "Data Confidence",
 ]
 
+REQUIRED_COLUMNS = [
+    "Date of submission",
+    "Sourcer",
+    "Skills",
+    "Name",
+    "Final Status",
+    "R1 Date",
+    "R2 Date",
+    "Current Designation",
+    "Total Exp",
+]
+
+# Canonical column names (case/spacing tolerant match)
+_COLUMN_CANONICAL = {name.lower(): name for name in REQUIRED_COLUMNS}
+
+# Output files excluded when auto-detecting a new upload
+_OUTPUT_XLSX_NAMES = {
+    "supply_mapping_powerbi_ready.xlsx",
+    "supply_mapping_analyzed.xlsx",
+}
+
+
+def _normalize_column_names(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df.columns = [str(col).strip() for col in df.columns]
+    rename: dict[str, str] = {}
+    for col in df.columns:
+        canonical = _COLUMN_CANONICAL.get(col.lower())
+        if canonical and col != canonical:
+            rename[col] = canonical
+    if rename:
+        df = df.rename(columns=rename)
+    return df
+
+
+def validate_supply_mapping_columns(df: pd.DataFrame) -> None:
+    """Raise ValueError if the workbook is not a Supply Mapping-format file."""
+    missing = [col for col in REQUIRED_COLUMNS if col not in df.columns]
+    if missing:
+        found = ", ".join(str(c) for c in df.columns[:20])
+        if len(df.columns) > 20:
+            found += ", ..."
+        raise ValueError(
+            "This Excel file is missing required Supply Mapping columns: "
+            f"{missing}. Found columns: {found}. "
+            "Please upload an .xlsx file with the same column headers as Supply Mapping."
+        )
+    if len(df) == 0:
+        raise ValueError(
+            "No candidate rows found. Ensure the file has data below the header row "
+            "and is not only the template row '(MM-DD-YY)'."
+        )
+
+
+def resolve_input_xlsx(
+    explicit_path: str | Path | None = None,
+    search_dir: str | Path | None = None,
+) -> Path:
+    """
+    Resolve which .xlsx to analyze.
+    Priority: explicit path → uploads/ newest → project folder newest (excluding outputs).
+    """
+    base = Path(search_dir or Path(__file__).parent)
+
+    if explicit_path:
+        path = Path(explicit_path).expanduser().resolve()
+        if not path.exists():
+            raise FileNotFoundError(f"Input file not found: {path}")
+        if path.suffix.lower() not in {".xlsx", ".xls"}:
+            raise ValueError(f"Input must be an Excel file (.xlsx or .xls): {path}")
+        return path
+
+    uploads_dir = base / "uploads"
+    if uploads_dir.is_dir():
+        upload_files = _list_input_xlsx_files(uploads_dir)
+        if upload_files:
+            return upload_files[0]
+
+    project_files = _list_input_xlsx_files(base)
+    if project_files:
+        return project_files[0]
+
+    raise FileNotFoundError(
+        "No input Excel found. Place any Supply Mapping-format .xlsx in this folder "
+        "or in uploads/, or run: python export_powerbi.py path/to/your_file.xlsx"
+    )
+
+
+def _list_input_xlsx_files(directory: Path) -> list[Path]:
+    files = [
+        p
+        for p in directory.glob("*.xlsx")
+        if p.name.lower() not in _OUTPUT_XLSX_NAMES and not p.name.startswith("~$")
+    ]
+    files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return files
+
 
 def load_and_clean_dataframe(file_bytes: bytes | str) -> pd.DataFrame:
     if isinstance(file_bytes, bytes):
@@ -444,8 +542,11 @@ def load_and_clean_dataframe(file_bytes: bytes | str) -> pd.DataFrame:
     else:
         source = file_bytes
     df = pd.read_excel(source, sheet_name=0)
-    df = df[df["Date of submission"] != "(MM-DD-YY)"].copy()
+    df = _normalize_column_names(df)
+    validate_supply_mapping_columns(df)
+    df = df[df["Date of submission"].astype(str).str.strip() != "(MM-DD-YY)"].copy()
     df = df.reset_index(drop=True)
+    validate_supply_mapping_columns(df)
     return df
 
 
