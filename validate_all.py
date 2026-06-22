@@ -2,13 +2,54 @@
 from __future__ import annotations
 
 import json
+import math
 import sys
+from datetime import date, datetime
 from pathlib import Path
+from typing import Any
 
-from analyzer import analyze_file_path
-from app import _preview_dataframe, _sanitize_for_json
+import numpy as np
+import pandas as pd
+
+from analyzer import PREVIEW_COLUMNS, analyze_file_path
 
 DATA = Path(__file__).parent / "Supply Mapping.xlsx"
+
+
+def _sanitize_for_json(obj: Any) -> Any:
+    if obj is None:
+        return None
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_for_json(v) for v in obj]
+    if isinstance(obj, (np.floating, float)):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return float(obj)
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (np.bool_,)):
+        return bool(obj)
+    if isinstance(obj, (pd.Timestamp, datetime, date)):
+        return obj.isoformat()
+    try:
+        if pd.isna(obj):
+            return None
+    except (TypeError, ValueError):
+        pass
+    return obj
+
+
+def _preview_dataframe(df: pd.DataFrame, limit: int = 200) -> list[dict]:
+    cols = [c for c in PREVIEW_COLUMNS if c in df.columns]
+    subset = df[cols].head(limit).copy()
+    for col in subset.columns:
+        if pd.api.types.is_datetime64_any_dtype(subset[col]):
+            subset[col] = subset[col].map(
+                lambda x: x.isoformat() if pd.notna(x) else None
+            )
+    return _sanitize_for_json(subset.replace({np.nan: None}).to_dict(orient="records"))
 
 
 def main() -> int:
@@ -58,6 +99,20 @@ def main() -> int:
 
     xl = pd.ExcelFile(out)
     expected_sheets = {
+        "PBI_Dashboard_Layout",
+        "Power BI Instructions",
+        "PBI_Summary",
+        "PBI_Funnel",
+        "PBI_Status",
+        "PBI_Sourcer_Chart",
+        "PBI_Candidates",
+        "PBI_Stage_Transitions",
+        "PBI_Bottleneck_Rounds",
+        "PBI_Bottleneck_Designation",
+        "PBI_Bottleneck_Sourcer",
+        "PBI_Slow_Movers_30Plus",
+        "PBI_Designation_Timing",
+        "PBI_Sourcer_Timing",
         "Recruitment Timeline",
         "Validation Report",
         "Summary",

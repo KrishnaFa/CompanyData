@@ -54,6 +54,114 @@ MAX_REASONABLE_DAYS_R12 = 14
 MIN_REASONABLE_DAYS_R12 = 1
 DEFAULT_R01_DAYS = 7.0
 DEFAULT_R12_DAYS = 2.0
+SLOW_THRESHOLD_DAYS = 30
+
+STAGE_TRANSITIONS = (
+    ("R0", "R1", "Days R0 to R1", 0, MAX_REASONABLE_DAYS_R01),
+    ("R1", "R2", "Days R1 to R2", MIN_REASONABLE_DAYS_R12, MAX_REASONABLE_DAYS_R12),
+    ("R0", "Offer Stage", "Days R0 to Offer Stage", 0, MAX_REASONABLE_DAYS_R01 * 2),
+)
+
+POWERBI_INSTRUCTIONS = [
+    "STEP 1 — Generate data: run  python export_powerbi.py  (uses Supply Mapping.xlsx). No HTML/website needed.",
+    "STEP 2 — Open Power BI Desktop → Get Data → Excel → select Supply_Mapping_PowerBI_Ready.xlsx.",
+    "STEP 3 — Load ALL sheets starting with PBI_ (check every PBI_ table). Click Load (not Transform unless you want to hide unused columns).",
+    "STEP 4 — Model view: create relationship PBI_Stage_Transitions[Candidate Key] → PBI_Candidates[Candidate Key] (Many-to-one, single direction).",
+    "STEP 5 — Build 3 report pages using sheet PBI_Dashboard_Layout as your visual blueprint (same layout as old HTML dashboard).",
+    "STEP 6 — Refresh: when new Supply Mapping file arrives, re-run export_powerbi.py and click Refresh in Power BI.",
+    "NOTE: R2→Offer days are not in source data. Use R0→Offer Stage as the offer-stage timing metric.",
+]
+
+POWERBI_DASHBOARD_LAYOUT = [
+    {
+        "Page": "1 - Executive Overview",
+        "Visual Type": "Card",
+        "Title": "Total Candidates",
+        "Data Table": "PBI_Summary",
+        "Fields": "Metric = Total Candidates, Value",
+        "Notes": "Repeat cards for Reached R1, Reached R2, Reached Offer, Avg R0→R1 Days, Slow Movers 30+",
+    },
+    {
+        "Page": "1 - Executive Overview",
+        "Visual Type": "Funnel",
+        "Title": "Recruitment Funnel",
+        "Data Table": "PBI_Funnel",
+        "Fields": "Stage (Group), Count (Values), Sort by Stage Order",
+        "Notes": "Same funnel as old HTML: R0 Applied → R1 → R2 → Offer",
+    },
+    {
+        "Page": "1 - Executive Overview",
+        "Visual Type": "Donut chart",
+        "Title": "Final Status Mix",
+        "Data Table": "PBI_Status",
+        "Fields": "Status (Legend), Count (Values)",
+        "Notes": "Matches old status doughnut chart",
+    },
+    {
+        "Page": "1 - Executive Overview",
+        "Visual Type": "Clustered bar chart",
+        "Title": "Sourcer Volume vs Conversion",
+        "Data Table": "PBI_Sourcer_Chart",
+        "Fields": "Sourcer (Axis), Total Submitted + Overall Conversion % (Values)",
+        "Notes": "Top 12 sourcers by volume — same as old sourcer chart",
+    },
+    {
+        "Page": "2 - Bottlenecks",
+        "Visual Type": "Clustered bar chart",
+        "Title": "Bottleneck by Round",
+        "Data Table": "PBI_Bottleneck_Rounds",
+        "Fields": "Transition (Axis), Avg Days (Values), Is Primary Bottleneck (Tooltips)",
+        "Notes": "Shows which round is slowest — R0→R1 vs R1→R2 vs R0→Offer",
+    },
+    {
+        "Page": "2 - Bottlenecks",
+        "Visual Type": "Table",
+        "Title": "Slow Designations (30+ days)",
+        "Data Table": "PBI_Bottleneck_Designation",
+        "Fields": "Designation, Total Candidates, Avg Days R0→R1, Count R0→R1 30+ Days, Primary Bottleneck",
+        "Notes": "Sort by Avg Days R0→R1 descending. Filter Any Stage 30+ Flag = True",
+    },
+    {
+        "Page": "2 - Bottlenecks",
+        "Visual Type": "Table",
+        "Title": "Slow Sourcers (30+ days)",
+        "Data Table": "PBI_Bottleneck_Sourcer",
+        "Fields": "Sourcer, Total Candidates, Avg Days R0→R1, Count R0→R1 30+ Days, Primary Bottleneck",
+        "Notes": "Sort by Avg Days R0→R1 descending",
+    },
+    {
+        "Page": "2 - Bottlenecks",
+        "Visual Type": "Clustered column chart",
+        "Title": "Processing Speed by Sourcer",
+        "Data Table": "PBI_Sourcer_Chart",
+        "Fields": "Sourcer (Axis), Avg Days R0→R1 + Avg Days R1→R2 (Values)",
+        "Notes": "Same speed chart as old HTML dashboard",
+    },
+    {
+        "Page": "3 - Detail & Slow Movers",
+        "Visual Type": "Matrix",
+        "Title": "Stage Days by Designation",
+        "Data Table": "PBI_Stage_Transitions",
+        "Fields": "Designation (Rows), Transition (Columns), Average of Days (Values)",
+        "Notes": "Heat-map style matrix for designation timing",
+    },
+    {
+        "Page": "3 - Detail & Slow Movers",
+        "Visual Type": "Table",
+        "Title": "Candidates Stuck 30+ Days",
+        "Data Table": "PBI_Slow_Movers_30Plus",
+        "Fields": "Name, Sourcer, Designation, Slowest Transition, Slowest Days, All Slow Transitions",
+        "Notes": "Full drill-down list of bottleneck candidates",
+    },
+    {
+        "Page": "3 - Detail & Slow Movers",
+        "Visual Type": "Table",
+        "Title": "All Candidates Timeline",
+        "Data Table": "PBI_Candidates",
+        "Fields": "Name, Sourcer, Designation, Final Status, Days R0 to R1, Days R1 to R2, Any Stage 30+ Days",
+        "Notes": "Replaces old timeline preview table",
+    },
+]
 
 ASSUMPTIONS = [
     "A1 – Year Correction (R1 & R2): All R1/R2 dates where R0 is 2025 but R1/R2 were entered as 2026 have been corrected to 2025. Reason: Submission dates for S.No 1–~516 are all in 2025. A 500+ day gap to a screening round is operationally impossible. These are clearly data entry errors.",
@@ -489,6 +597,11 @@ def analyze_supply_data(file_bytes: bytes) -> dict[str, Any]:
     df["Reached R1"] = df["Final Status"].fillna("Unknown").isin(REACHED_R1)
     df["Reached R2"] = df["Final Status"].fillna("Unknown").isin(REACHED_R2)
     df["Reached Offer"] = df["Final Status"].fillna("Unknown").isin(REACHED_OFFER)
+    df["Days R0 to Offer Stage"] = np.where(
+        df["Reached Offer"] & df["R0"].notna() & df["R2 Date (Final)"].notna(),
+        (df["R2 Date (Final)"] - df["R0"]).dt.days,
+        np.nan,
+    )
     df["Data Confidence"] = df.apply(_data_confidence_label, axis=1)
 
     validation = _run_validation_checks(df)
@@ -499,8 +612,55 @@ def analyze_supply_data(file_bytes: bytes) -> dict[str, Any]:
     sourcer_breakdown = _build_sourcer_breakdown(df)
     designation_breakdown = _build_designation_breakdown(df)
 
+    pbi_candidates = _build_powerbi_candidates(df)
+    stage_transitions = _build_stage_transitions_long(df)
+    bottleneck_rounds = _build_bottleneck_by_round(df)
+    bottleneck_designation = _build_bottleneck_by_designation(df)
+    bottleneck_sourcer = _build_bottleneck_by_sourcer(df)
+    slow_movers = _build_slow_movers_detail(df)
+    designation_timing = _build_timing_by_designation(df)
+    sourcer_timing = _build_timing_by_sourcer(df)
+    pbi_summary = _build_pbi_summary(df, slow_movers)
+    pbi_funnel = _build_pbi_funnel(df)
+    pbi_status = _build_pbi_status(df)
+    pbi_sourcer_chart = _build_pbi_sourcer_chart(sourcer_summary)
+    pbi_dashboard_layout = _build_pbi_dashboard_layout()
+
     excel_bytes = _build_excel_output(
-        df, summary, sourcer_summary, sourcer_breakdown, designation_breakdown, validation_df
+        df,
+        summary,
+        sourcer_summary,
+        sourcer_breakdown,
+        designation_breakdown,
+        validation_df,
+        pbi_candidates=pbi_candidates,
+        stage_transitions=stage_transitions,
+        bottleneck_rounds=bottleneck_rounds,
+        bottleneck_designation=bottleneck_designation,
+        bottleneck_sourcer=bottleneck_sourcer,
+        slow_movers=slow_movers,
+        designation_timing=designation_timing,
+        sourcer_timing=sourcer_timing,
+        pbi_summary=pbi_summary,
+        pbi_funnel=pbi_funnel,
+        pbi_status=pbi_status,
+        pbi_sourcer_chart=pbi_sourcer_chart,
+        pbi_dashboard_layout=pbi_dashboard_layout,
+    )
+    powerbi_csv_zip = _build_powerbi_csv_zip(
+        pbi_candidates,
+        stage_transitions,
+        bottleneck_rounds,
+        bottleneck_designation,
+        bottleneck_sourcer,
+        slow_movers,
+        designation_timing,
+        sourcer_timing,
+        pbi_summary,
+        pbi_funnel,
+        pbi_status,
+        pbi_sourcer_chart,
+        pbi_dashboard_layout,
     )
 
     return {
@@ -509,8 +669,23 @@ def analyze_supply_data(file_bytes: bytes) -> dict[str, Any]:
         "sourcer_summary": sourcer_summary,
         "sourcer_breakdown": sourcer_breakdown,
         "designation_breakdown": designation_breakdown,
+        "pbi_candidates": pbi_candidates,
+        "stage_transitions": stage_transitions,
+        "bottleneck_rounds": bottleneck_rounds,
+        "bottleneck_designation": bottleneck_designation,
+        "bottleneck_sourcer": bottleneck_sourcer,
+        "slow_movers": slow_movers,
+        "designation_timing": designation_timing,
+        "sourcer_timing": sourcer_timing,
+        "pbi_summary": pbi_summary,
+        "pbi_funnel": pbi_funnel,
+        "pbi_status": pbi_status,
+        "pbi_sourcer_chart": pbi_sourcer_chart,
+        "pbi_dashboard_layout": pbi_dashboard_layout,
         "assumptions": ASSUMPTIONS,
+        "powerbi_instructions": POWERBI_INSTRUCTIONS,
         "excel_bytes": excel_bytes,
+        "powerbi_csv_zip": powerbi_csv_zip,
         "stats": _build_stats(df),
         "charts": _build_charts(df, sourcer_summary),
         "status_distribution": _build_status_distribution(df),
@@ -1029,6 +1204,462 @@ def _build_designation_breakdown(df: pd.DataFrame) -> pd.DataFrame:
     return result.reset_index(drop=True)
 
 
+def _candidate_key(row: pd.Series) -> str:
+    sno = row.get("S.No")
+    if pd.notna(sno):
+        return f"C{int(float(sno))}"
+    name = str(row.get("Name") or "Unknown").strip()
+    return f"N{name[:40]}"
+
+
+def _is_slow(days: Any) -> bool:
+    if pd.isna(days):
+        return False
+    try:
+        return float(days) >= SLOW_THRESHOLD_DAYS
+    except (TypeError, ValueError):
+        return False
+
+
+def _trusted_days(
+    days: Any,
+    min_days: float = 0,
+    max_days: float = MAX_REASONABLE_DAYS_R01,
+) -> bool:
+    if pd.isna(days):
+        return False
+    try:
+        value = float(days)
+    except (TypeError, ValueError):
+        return False
+    return min_days <= value <= max_days
+
+
+def _stage_timing_metrics(
+    group: pd.DataFrame,
+    col: str,
+    min_days: float = 0,
+    max_days: float = MAX_REASONABLE_DAYS_R01,
+) -> dict[str, Any]:
+    valid = group[col].dropna()
+    valid = valid[valid.apply(lambda d: _trusted_days(d, min_days, max_days))]
+    count_valid = int(len(valid))
+    slow_count = int((valid >= SLOW_THRESHOLD_DAYS).sum()) if count_valid else 0
+    return {
+        "count_valid": count_valid,
+        "avg_days": _safe_mean(group[col], min_days=min_days, max_days=max_days),
+        "median_days": _safe_median(group[col], min_days=min_days, max_days=max_days),
+        "slow_30plus_count": slow_count,
+        "slow_30plus_pct": round(slow_count / count_valid * 100, 2) if count_valid else 0,
+        "max_days": round(float(valid.max()), 2) if count_valid else None,
+    }
+
+
+def _primary_bottleneck(metrics: dict[str, dict[str, Any]]) -> str:
+    ranked = []
+    for label, data in metrics.items():
+        avg = data.get("avg_days")
+        if avg is not None:
+            ranked.append((label, avg, data.get("slow_30plus_count", 0)))
+    if not ranked:
+        return "Insufficient data"
+    ranked.sort(key=lambda item: (item[1], item[2]), reverse=True)
+    return ranked[0][0]
+
+
+def _build_powerbi_candidates(df: pd.DataFrame) -> pd.DataFrame:
+    records = []
+    for _, row in df.iterrows():
+        slow_stages = []
+        for _, _, col, min_d, max_d in STAGE_TRANSITIONS:
+            days = row.get(col)
+            if _trusted_days(days, min_d, max_d) and _is_slow(days):
+                slow_stages.append(col.replace("Days ", "").replace(" to ", "→"))
+
+        records.append(
+            {
+                "Candidate Key": _candidate_key(row),
+                "S.No": row.get("S.No"),
+                "Name": row.get("Name"),
+                "Sourcer": row.get("Sourcer") if pd.notna(row.get("Sourcer")) else "Unknown",
+                "Source Head": row.get("Source head") if "Source head" in df.columns else "",
+                "Skills": row.get("Skills"),
+                "Current Designation": row.get("Current Designation")
+                if pd.notna(row.get("Current Designation"))
+                else "Unknown",
+                "Proposed Level": row.get("Proposed Level"),
+                "Exp Bucket": row.get("Exp Bucket"),
+                "Final Status": row.get("Final Status"),
+                "R0 Date": row.get("R0"),
+                "R1 Date": row.get("R1 Date (Final)"),
+                "R2 Date": row.get("R2 Date (Final)"),
+                "Days R0 to R1": row.get("Days R0 to R1"),
+                "Days R1 to R2": row.get("Days R1 to R2"),
+                "Days R0 to Offer Stage": row.get("Days R0 to Offer Stage"),
+                "Total Pipeline Days R0 to R2": row.get("Total Pipeline Days (R0 to R2)"),
+                "Reached R1": bool(row.get("Reached R1")),
+                "Reached R2": bool(row.get("Reached R2")),
+                "Reached Offer": bool(row.get("Reached Offer")),
+                "Any Stage 30+ Days": bool(slow_stages),
+                "Slow Stages": ", ".join(slow_stages),
+                "Data Confidence": row.get("Data Confidence"),
+            }
+        )
+    return pd.DataFrame(records)
+
+
+def _build_stage_transitions_long(df: pd.DataFrame) -> pd.DataFrame:
+    records = []
+    for _, row in df.iterrows():
+        key = _candidate_key(row)
+        sourcer = row.get("Sourcer") if pd.notna(row.get("Sourcer")) else "Unknown"
+        designation = (
+            row.get("Current Designation")
+            if pd.notna(row.get("Current Designation"))
+            else "Unknown"
+        )
+        for from_stage, to_stage, col, min_d, max_d in STAGE_TRANSITIONS:
+            days = row.get(col)
+            if not _trusted_days(days, min_d, max_d):
+                continue
+            records.append(
+                {
+                    "Candidate Key": key,
+                    "Name": row.get("Name"),
+                    "Sourcer": sourcer,
+                    "Designation": designation,
+                    "Skills": row.get("Skills"),
+                    "Final Status": row.get("Final Status"),
+                    "Stage From": from_stage,
+                    "Stage To": to_stage,
+                    "Transition": f"{from_stage}→{to_stage}",
+                    "Days": int(float(days)),
+                    "Is Slow 30+ Days": _is_slow(days),
+                    "Data Confidence": row.get("Data Confidence"),
+                }
+            )
+    result = pd.DataFrame(records)
+    if len(result):
+        result = result.sort_values(["Transition", "Days"], ascending=[True, False])
+    return result.reset_index(drop=True)
+
+
+def _build_bottleneck_by_round(df: pd.DataFrame) -> pd.DataFrame:
+    records = []
+    for from_stage, to_stage, col, min_d, max_d in STAGE_TRANSITIONS:
+        metrics = _stage_timing_metrics(df, col, min_days=min_d, max_days=max_d)
+        records.append(
+            {
+                "Transition": f"{from_stage}→{to_stage}",
+                "Stage From": from_stage,
+                "Stage To": to_stage,
+                "Candidates With Data": metrics["count_valid"],
+                "Avg Days": metrics["avg_days"],
+                "Median Days": metrics["median_days"],
+                "Max Days": metrics["max_days"],
+                "Count 30+ Days": metrics["slow_30plus_count"],
+                "Pct 30+ Days": metrics["slow_30plus_pct"],
+            }
+        )
+
+    result = pd.DataFrame(records)
+    if len(result):
+        primary = result.sort_values(
+            ["Avg Days", "Pct 30+ Days"], ascending=[False, False]
+        ).iloc[0]["Transition"]
+        result["Is Primary Bottleneck"] = result["Transition"] == primary
+        result = result.sort_values("Avg Days", ascending=False)
+    return result.reset_index(drop=True)
+
+
+def _build_dimension_bottleneck(
+    df: pd.DataFrame,
+    dimension_col: str,
+    dimension_label: str,
+    min_volume: int = 3,
+) -> pd.DataFrame:
+    records = []
+    subset = df.copy()
+    subset[dimension_col] = subset[dimension_col].fillna("Unknown")
+
+    for name, group in subset.groupby(dimension_col, dropna=False):
+        total = len(group)
+        if total < min_volume:
+            continue
+
+        r01 = _stage_timing_metrics(group, "Days R0 to R1")
+        r12 = _stage_timing_metrics(
+            group,
+            "Days R1 to R2",
+            min_days=MIN_REASONABLE_DAYS_R12,
+            max_days=MAX_REASONABLE_DAYS_R12,
+        )
+        r0o = _stage_timing_metrics(
+            group,
+            "Days R0 to Offer Stage",
+            min_days=0,
+            max_days=MAX_REASONABLE_DAYS_R01 * 2,
+        )
+
+        metrics = {
+            "R0→R1": r01,
+            "R1→R2": r12,
+            "R0→Offer Stage": r0o,
+        }
+        primary = _primary_bottleneck(metrics)
+
+        records.append(
+            {
+                dimension_label: name,
+                "Total Candidates": total,
+                "Avg Days R0→R1": r01["avg_days"],
+                "Median Days R0→R1": r01["median_days"],
+                "Count R0→R1 30+ Days": r01["slow_30plus_count"],
+                "Pct R0→R1 30+ Days": r01["slow_30plus_pct"],
+                "Avg Days R1→R2": r12["avg_days"],
+                "Median Days R1→R2": r12["median_days"],
+                "Count R1→R2 30+ Days": r12["slow_30plus_count"],
+                "Pct R1→R2 30+ Days": r12["slow_30plus_pct"],
+                "Avg Days R0→Offer Stage": r0o["avg_days"],
+                "Count R0→Offer 30+ Days": r0o["slow_30plus_count"],
+                "Primary Bottleneck": primary,
+                "Any Stage 30+ Flag": any(
+                    metrics[stage]["slow_30plus_count"] > 0 for stage in metrics
+                ),
+            }
+        )
+
+    result = pd.DataFrame(records)
+    if len(result):
+        sort_col = "Avg Days R0→R1"
+        for col in ("Avg Days R0→R1", "Avg Days R1→R2", "Avg Days R0→Offer Stage"):
+            if result[col].notna().any():
+                sort_col = col
+                break
+        result = result.sort_values(sort_col, ascending=False, na_position="last")
+    return result.reset_index(drop=True)
+
+
+def _build_bottleneck_by_designation(df: pd.DataFrame) -> pd.DataFrame:
+    return _build_dimension_bottleneck(df, "Current Designation", "Designation")
+
+
+def _build_bottleneck_by_sourcer(df: pd.DataFrame) -> pd.DataFrame:
+    return _build_dimension_bottleneck(df, "Sourcer", "Sourcer")
+
+
+def _build_timing_by_designation(df: pd.DataFrame) -> pd.DataFrame:
+    result = _build_bottleneck_by_designation(df)
+    if len(result):
+        slow = result[
+            (result["Pct R0→R1 30+ Days"] >= 50)
+            | (result["Count R0→R1 30+ Days"] >= 5)
+            | (result["Count R1→R2 30+ Days"] >= 3)
+        ].copy()
+        slow["Slow Mover Category"] = "Designation with 30+ day delays"
+        result["Slow Mover Category"] = np.where(
+            result.index.isin(slow.index),
+            "Designation with 30+ day delays",
+            "",
+        )
+    return result
+
+
+def _build_timing_by_sourcer(df: pd.DataFrame) -> pd.DataFrame:
+    result = _build_bottleneck_by_sourcer(df)
+    if len(result):
+        slow = result[
+            (result["Pct R0→R1 30+ Days"] >= 50)
+            | (result["Count R0→R1 30+ Days"] >= 5)
+            | (result["Avg Days R0→R1"].fillna(0) >= SLOW_THRESHOLD_DAYS)
+        ].copy()
+        result["Slow Mover Category"] = np.where(
+            result.index.isin(slow.index),
+            "Sourcer with 30+ day delays",
+            "",
+        )
+    return result
+
+
+def _build_slow_movers_detail(df: pd.DataFrame) -> pd.DataFrame:
+    records = []
+    for _, row in df.iterrows():
+        slow_transitions = []
+        for from_stage, to_stage, col, min_d, max_d in STAGE_TRANSITIONS:
+            days = row.get(col)
+            if _trusted_days(days, min_d, max_d) and _is_slow(days):
+                slow_transitions.append(
+                    {
+                        "transition": f"{from_stage}→{to_stage}",
+                        "days": int(float(days)),
+                    }
+                )
+        if not slow_transitions:
+            continue
+
+        worst = max(slow_transitions, key=lambda item: item["days"])
+        records.append(
+            {
+                "Candidate Key": _candidate_key(row),
+                "S.No": row.get("S.No"),
+                "Name": row.get("Name"),
+                "Sourcer": row.get("Sourcer") if pd.notna(row.get("Sourcer")) else "Unknown",
+                "Designation": row.get("Current Designation")
+                if pd.notna(row.get("Current Designation"))
+                else "Unknown",
+                "Skills": row.get("Skills"),
+                "Final Status": row.get("Final Status"),
+                "Slowest Transition": worst["transition"],
+                "Slowest Days": worst["days"],
+                "All Slow Transitions": ", ".join(
+                    f"{item['transition']} ({item['days']}d)" for item in slow_transitions
+                ),
+                "Days R0 to R1": row.get("Days R0 to R1"),
+                "Days R1 to R2": row.get("Days R1 to R2"),
+                "Days R0 to Offer Stage": row.get("Days R0 to Offer Stage"),
+                "R0 Date": row.get("R0"),
+                "R1 Date": row.get("R1 Date (Final)"),
+                "R2 Date": row.get("R2 Date (Final)"),
+            }
+        )
+
+    result = pd.DataFrame(records)
+    if len(result):
+        result = result.sort_values("Slowest Days", ascending=False)
+    return result.reset_index(drop=True)
+
+
+def _build_pbi_summary(df: pd.DataFrame, slow_movers: pd.DataFrame) -> pd.DataFrame:
+    total = len(df)
+    reached_r1 = int(df["Reached R1"].sum())
+    reached_r2 = int(df["Reached R2"].sum())
+    reached_offer = int(df["Reached Offer"].sum())
+    rows = [
+        ("Total Candidates", total),
+        ("Reached R1", reached_r1),
+        ("Reached R2", reached_r2),
+        ("Reached Offer", reached_offer),
+        ("R0→R1 Conversion %", round(reached_r1 / total * 100, 2) if total else 0),
+        ("R1→R2 Conversion %", round(reached_r2 / reached_r1 * 100, 2) if reached_r1 else 0),
+        ("R2→Offer Conversion %", round(reached_offer / reached_r2 * 100, 2) if reached_r2 else 0),
+        ("Overall Conversion %", round(reached_offer / total * 100, 2) if total else 0),
+        ("Avg Days R0→R1", _safe_mean(df["Days R0 to R1"])),
+        ("Avg Days R1→R2", _safe_mean(
+            df["Days R1 to R2"],
+            min_days=MIN_REASONABLE_DAYS_R12,
+            max_days=MAX_REASONABLE_DAYS_R12,
+        )),
+        ("Slow Movers 30+ Days", int(len(slow_movers))),
+        ("Candidates 30+ at R0→R1", int((df["Days R0 to R1"] >= SLOW_THRESHOLD_DAYS).sum())),
+    ]
+    return pd.DataFrame([{"Metric": name, "Value": value} for name, value in rows])
+
+
+def _build_pbi_funnel(df: pd.DataFrame) -> pd.DataFrame:
+    total = len(df)
+    reached_r1 = int(df["Reached R1"].sum())
+    reached_r2 = int(df["Reached R2"].sum())
+    reached_offer = int(df["Reached Offer"].sum())
+    stages = [
+        ("R0 Applied", total, 1),
+        ("R1 Interview", reached_r1, 2),
+        ("R2 Interview", reached_r2, 3),
+        ("Offer Stage", reached_offer, 4),
+    ]
+    records = []
+    for stage, count, order in stages:
+        pct = round(count / total * 100, 2) if total else 0
+        records.append(
+            {
+                "Stage": stage,
+                "Stage Order": order,
+                "Count": count,
+                "Pct of R0": pct,
+            }
+        )
+    return pd.DataFrame(records)
+
+
+def _build_pbi_status(df: pd.DataFrame) -> pd.DataFrame:
+    counts = df["Final Status"].fillna("Unknown").value_counts()
+    return pd.DataFrame(
+        [{"Status": str(status), "Count": int(count)} for status, count in counts.items()]
+    )
+
+
+def _build_pbi_sourcer_chart(sourcer_summary: pd.DataFrame) -> pd.DataFrame:
+    if not len(sourcer_summary):
+        return pd.DataFrame(
+            columns=[
+                "Sourcer",
+                "Total Submitted",
+                "Overall Conversion %",
+                "R0→R1 Conversion %",
+                "Avg Days R0→R1",
+                "Avg Days R1→R2",
+            ]
+        )
+    chart = sourcer_summary.sort_values("Total Submitted", ascending=False).head(12).copy()
+    return chart[
+        [
+            "Sourcer",
+            "Total Submitted",
+            "Overall Conversion %",
+            "R0→R1 Conversion %",
+            "Avg Days R0→R1",
+            "Avg Days R1→R2",
+        ]
+    ].reset_index(drop=True)
+
+
+def _build_pbi_dashboard_layout() -> pd.DataFrame:
+    return pd.DataFrame(POWERBI_DASHBOARD_LAYOUT)
+
+
+def _build_powerbi_csv_zip(
+    pbi_candidates: pd.DataFrame,
+    stage_transitions: pd.DataFrame,
+    bottleneck_rounds: pd.DataFrame,
+    bottleneck_designation: pd.DataFrame,
+    bottleneck_sourcer: pd.DataFrame,
+    slow_movers: pd.DataFrame,
+    designation_timing: pd.DataFrame,
+    sourcer_timing: pd.DataFrame,
+    pbi_summary: pd.DataFrame,
+    pbi_funnel: pd.DataFrame,
+    pbi_status: pd.DataFrame,
+    pbi_sourcer_chart: pd.DataFrame,
+    pbi_dashboard_layout: pd.DataFrame,
+) -> bytes:
+    import zipfile
+
+    tables = {
+        "PBI_Summary.csv": pbi_summary,
+        "PBI_Funnel.csv": pbi_funnel,
+        "PBI_Status.csv": pbi_status,
+        "PBI_Sourcer_Chart.csv": pbi_sourcer_chart,
+        "PBI_Dashboard_Layout.csv": pbi_dashboard_layout,
+        "PBI_Candidates.csv": pbi_candidates,
+        "PBI_Stage_Transitions.csv": stage_transitions,
+        "PBI_Bottleneck_Rounds.csv": bottleneck_rounds,
+        "PBI_Bottleneck_Designation.csv": bottleneck_designation,
+        "PBI_Bottleneck_Sourcer.csv": bottleneck_sourcer,
+        "PBI_Slow_Movers_30Plus.csv": slow_movers,
+        "PBI_Designation_Timing.csv": designation_timing,
+        "PBI_Sourcer_Timing.csv": sourcer_timing,
+        "PowerBI_Instructions.csv": pd.DataFrame({"Step": POWERBI_INSTRUCTIONS}),
+    }
+
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as zf:
+        for filename, frame in tables.items():
+            csv_buffer = io.StringIO()
+            frame.to_csv(csv_buffer, index=False)
+            zf.writestr(filename, csv_buffer.getvalue())
+    output.seek(0)
+    return output.getvalue()
+
+
 def _format_days_int(x: Any) -> Any:
     if pd.isna(x) or x == "":
         return ""
@@ -1184,12 +1815,44 @@ def _build_excel_output(
     sourcer_breakdown: pd.DataFrame,
     designation_breakdown: pd.DataFrame,
     validation_df: pd.DataFrame,
+    *,
+    pbi_candidates: pd.DataFrame,
+    stage_transitions: pd.DataFrame,
+    bottleneck_rounds: pd.DataFrame,
+    bottleneck_designation: pd.DataFrame,
+    bottleneck_sourcer: pd.DataFrame,
+    slow_movers: pd.DataFrame,
+    designation_timing: pd.DataFrame,
+    sourcer_timing: pd.DataFrame,
+    pbi_summary: pd.DataFrame,
+    pbi_funnel: pd.DataFrame,
+    pbi_status: pd.DataFrame,
+    pbi_sourcer_chart: pd.DataFrame,
+    pbi_dashboard_layout: pd.DataFrame,
 ) -> bytes:
     output = io.BytesIO()
     export_df = _prepare_recruitment_timeline_export(df)
     assumptions_df = pd.DataFrame({"Assumptions": ASSUMPTIONS})
+    powerbi_instructions_df = pd.DataFrame({"Power BI Setup Steps": POWERBI_INSTRUCTIONS})
 
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        pbi_dashboard_layout.to_excel(writer, sheet_name="PBI_Dashboard_Layout", index=False)
+        powerbi_instructions_df.to_excel(writer, sheet_name="Power BI Instructions", index=False)
+        pbi_summary.to_excel(writer, sheet_name="PBI_Summary", index=False)
+        pbi_funnel.to_excel(writer, sheet_name="PBI_Funnel", index=False)
+        pbi_status.to_excel(writer, sheet_name="PBI_Status", index=False)
+        pbi_sourcer_chart.to_excel(writer, sheet_name="PBI_Sourcer_Chart", index=False)
+        pbi_candidates.to_excel(writer, sheet_name="PBI_Candidates", index=False)
+        stage_transitions.to_excel(writer, sheet_name="PBI_Stage_Transitions", index=False)
+        bottleneck_rounds.to_excel(writer, sheet_name="PBI_Bottleneck_Rounds", index=False)
+        bottleneck_designation.to_excel(
+            writer, sheet_name="PBI_Bottleneck_Designation", index=False
+        )
+        bottleneck_sourcer.to_excel(writer, sheet_name="PBI_Bottleneck_Sourcer", index=False)
+        slow_movers.to_excel(writer, sheet_name="PBI_Slow_Movers_30Plus", index=False)
+        designation_timing.to_excel(writer, sheet_name="PBI_Designation_Timing", index=False)
+        sourcer_timing.to_excel(writer, sheet_name="PBI_Sourcer_Timing", index=False)
+
         export_df.to_excel(writer, sheet_name="Recruitment Timeline", index=False, startrow=1)
         validation_df.to_excel(writer, sheet_name="Validation Report", index=False)
         summary.to_excel(writer, sheet_name="Summary", index=False)
@@ -1233,7 +1896,7 @@ def _build_excel_output(
         _style_recruitment_timeline_sheet(ws)
 
         for sheet_name in writer.sheets:
-            if sheet_name != "Recruitment Timeline":
+            if sheet_name not in ("Recruitment Timeline",):
                 _style_excel_worksheet(writer.sheets[sheet_name])
 
     output.seek(0)
