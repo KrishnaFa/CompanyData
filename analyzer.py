@@ -167,7 +167,15 @@ POWERBI_DASHBOARD_LAYOUT = [
 ASSUMPTIONS = [
     "A1 – Year Correction (R1 & R2): All R1/R2 dates where R0 is 2025 but R1/R2 were entered as 2026 have been corrected to 2025. Reason: Submission dates for S.No 1–~516 are all in 2025. A 500+ day gap to a screening round is operationally impossible. These are clearly data entry errors.",
     "A2 – 2026 dates for S.No 517+ are genuine: R0 dates from Jan 2026 onward are treated as real 2026 dates. R1/R2 dates in 2026 for these records are kept as-is. The data clearly shows two cohorts: 2025 submissions (S.No 1–~516) and 2026 submissions (S.No ~517+).",
-    "A3 – R1 Imputation Method: Missing R1 = R0 + cohort-average gap (same Skills + same submission date group). Fallback 1: average for same Skills across all dates. Fallback 2: global mean (91 days). Cohort-level imputation preserves hiring-wave patterns.",
+    "A3 – R1 Prediction Model (7-Level Hierarchy): Missing R1 dates are predicted using a hierarchical model. "
+    "Level 1: Median actual R1 date of candidates with the same Designation + Skills + exact R0 date (batch cohort). "
+    "Level 2: Median actual R1 date of same Designation + Skills + same R0 month. "
+    "Level 3: Median actual R1 date of same Designation + same R0 month. "
+    "Level 4: R0 + median gap for same Designation + Skills (gap-based). "
+    "Level 5: R0 + median gap for same Designation only. "
+    "Level 6: R0 + median gap for same Skills only. "
+    "Level 7 (Global Fallback): R0 + global median gap. "
+    "Traceability: each predicted row records which level was used in the R1 Assumption/Note column.",
     "A4 – R1→R2 Fixed Gap: R2 imputed as R1 + 2 days. Every single observed R1→R2 gap in the entire dataset is exactly 2 days — 100% consistent.",
     "A5 – Interview Dropout / On Hold / Not Interested: No R1 or R2 dates assigned. These candidates did not progress to interview. Assigning dates would introduce false information.",
     "A6 – R1 Reject: Only R1 filled; R2 left blank. Rejected at R1 → no R2 took place.",
@@ -183,6 +191,55 @@ def _normalize_text(value: Any) -> str:
     text = str(value).strip().lower()
     text = re.sub(r"\s+", " ", text)
     return text
+
+
+# Map common short-forms / typos to canonical designation labels
+_DESIGNATION_ALIASES: dict[str, str] = {
+    "sse": "senior software engineer",
+    "se ": "software engineer",
+    "sr software engineer": "senior software engineer",
+    "sr. software engineer": "senior software engineer",
+    "senior se": "senior software engineer",
+    "sr se": "senior software engineer",
+    "software engg": "software engineer",
+    "software eng": "software engineer",
+    "tech lead": "technical lead",
+    "tl": "technical lead",
+    "tech l": "technical lead",
+    "tech. lead": "technical lead",
+    "technical l": "technical lead",
+    "deveops engineer": "devops engineer",
+    "devops engg": "devops engineer",
+    "dev ops engineer": "devops engineer",
+    "sde": "software development engineer",
+    "sde-1": "software development engineer",
+    "sde-2": "senior software development engineer",
+    "sde 1": "software development engineer",
+    "sde 2": "senior software development engineer",
+    "sr developer": "senior developer",
+    "sr. developer": "senior developer",
+    "senior swe": "senior software engineer",
+    "swe": "software engineer",
+    "lead engineer": "technical lead",
+    "lead developer": "technical lead",
+}
+
+
+def _normalize_designation(value: Any) -> str:
+    """Return a normalized (lowercase, stripped, alias-resolved) designation string."""
+    if pd.isna(value):
+        return ""
+    raw = str(value).strip().lower()
+    raw = re.sub(r"[\u00a0\s]+", " ", raw)  # collapse nbsp + whitespace
+    raw = raw.strip()
+    # Try exact alias match first
+    if raw in _DESIGNATION_ALIASES:
+        return _DESIGNATION_ALIASES[raw]
+    # Try prefix alias match for longer strings
+    for alias, canonical in _DESIGNATION_ALIASES.items():
+        if raw.startswith(alias):
+            return canonical
+    return raw
 
 
 def _exp_bucket(value: Any) -> str:
@@ -592,26 +649,82 @@ def analyze_supply_data(file_bytes: bytes) -> dict[str, Any]:
         np.nan,
     )
 
-    # Build cohort, skills, and global averages (no arbitrary capping at 60 days)
-    # Cohort mapping: (Skills, R0) -> mean_gap
-    cohort_mean_gap = {}
-    for (skills, r0), group in df.groupby(["Skills", "R0"]):
-        clean_gaps = group["actual_R1_gap"].dropna()
-        if len(clean_gaps) > 0:
-            cohort_mean_gap[(skills, r0)] = int(round(clean_gaps.mean()))
+    # --------------------------------------------------------------------------
+    # Build hierarchical lookup tables for the 7-level R1 prediction model
+    # --------------------------------------------------------------------------
 
-    # Skills mapping: Skills -> mean_gap
-    skills_mean_gap = {}
-    for skills, group in df.groupby("Skills"):
-        clean_gaps = group["actual_R1_gap"].dropna()
-        if len(clean_gaps) > 0:
-            skills_mean_gap[skills] = int(round(clean_gaps.mean()))
+    # Add normalised designation column for grouping
+    df["_desig_norm"] = df["Current Designation"].apply(_normalize_designation)
+    df["_r0_month"] = df["R0"].apply(lambda x: x.strftime("%Y-%m") if pd.notna(x) else "")
+    df["_skills_norm"] = df["Skills"].apply(_normalize_text)
 
-    # Global average gap
+    # Helper: compute median gap (in days) for a subset
+    def _med_gap(subset: pd.DataFrame) -> float | None:
+        vals = subset["actual_R1_gap"].dropna()
+        vals = vals[(vals >= 0) & (vals <= MAX_REASONABLE_DAYS_R01)]
+        return float(vals.median()) if len(vals) >= 1 else None
+
+    # Helper: compute median R1 date (as Timestamp) for a subset
+    def _med_r1_date(subset: pd.DataFrame) -> pd.Timestamp | None:
+        dates = subset.loc[
+            subset["R1 Source"].isin(["Original", "Yr Corrected"]), "R1 Date (Final)"
+        ].dropna()
+        if len(dates) == 0:
+            return None
+        med_ts = int(dates.apply(lambda x: x.timestamp()).median())
+        return pd.Timestamp(med_ts, unit="s").normalize()
+
+    # --- Pre-compute lookup dicts ---
+    # Level 1: desig + skills + exact R0 date  → median R1 date
+    lvl1_r1date: dict[tuple, pd.Timestamp] = {}
+    for key, grp in df.groupby(["_desig_norm", "_skills_norm", "R0"]):
+        med = _med_r1_date(grp)
+        if med is not None:
+            lvl1_r1date[key] = med
+
+    # Level 2: desig + skills + R0 month  → median R1 date
+    lvl2_r1date: dict[tuple, pd.Timestamp] = {}
+    for key, grp in df.groupby(["_desig_norm", "_skills_norm", "_r0_month"]):
+        med = _med_r1_date(grp)
+        if med is not None:
+            lvl2_r1date[key] = med
+
+    # Level 3: desig + R0 month  → median R1 date
+    lvl3_r1date: dict[tuple, pd.Timestamp] = {}
+    for key, grp in df.groupby(["_desig_norm", "_r0_month"]):
+        med = _med_r1_date(grp)
+        if med is not None:
+            lvl3_r1date[key] = med
+
+    # Level 4: desig + skills  → median gap
+    lvl4_gap: dict[tuple, float] = {}
+    for key, grp in df.groupby(["_desig_norm", "_skills_norm"]):
+        med = _med_gap(grp)
+        if med is not None:
+            lvl4_gap[key] = med
+
+    # Level 5: desig only  → median gap
+    lvl5_gap: dict[str, float] = {}
+    for key, grp in df.groupby("_desig_norm"):
+        med = _med_gap(grp)
+        if med is not None:
+            lvl5_gap[key] = med
+
+    # Level 6: skills only  → median gap
+    lvl6_gap: dict[str, float] = {}
+    for key, grp in df.groupby("_skills_norm"):
+        med = _med_gap(grp)
+        if med is not None:
+            lvl6_gap[key] = med
+
+    # Level 7: global median gap
     all_actual_gaps = df["actual_R1_gap"].dropna()
-    global_mean_gap = int(round(all_actual_gaps.mean())) if len(all_actual_gaps) > 0 else 91
+    all_actual_gaps = all_actual_gaps[(all_actual_gaps >= 0) & (all_actual_gaps <= MAX_REASONABLE_DAYS_R01)]
+    global_median_gap = float(all_actual_gaps.median()) if len(all_actual_gaps) > 0 else 91.0
 
-    # Impute missing dates
+    # --------------------------------------------------------------------------
+    # Impute / Predict missing R1 (and R2) dates using hierarchical model
+    # --------------------------------------------------------------------------
     for idx, row in df.iterrows():
         st = row["Final Status"]
         if pd.isna(st) or st in NO_IMPUTE:
@@ -621,25 +734,103 @@ def analyze_supply_data(file_bytes: bytes) -> dict[str, Any]:
         needs_r2 = st in REACHED_R2 and pd.isna(row["R2 Date (Final)"])
 
         if needs_r1:
-            skills = row["Skills"]
+            desig = row["_desig_norm"]
+            skills = row["_skills_norm"]
             r0 = row["R0"]
+            r0_month = row["_r0_month"]
             r0_str = r0.strftime("%Y-%m-%d") if pd.notna(r0) else ""
 
-            if (skills, r0) in cohort_mean_gap:
-                gap = cohort_mean_gap[(skills, r0)]
-                method = f"cohort avg ({skills} | {r0_str}): {gap} days"
-            elif skills in skills_mean_gap:
-                gap = skills_mean_gap[skills]
-                method = f"skills avg ({skills}): {gap} days (no exact cohort match)"
-            else:
-                gap = global_mean_gap
-                method = f"global avg: {gap} days (no skills/cohort match)"
+            imputed_r1: pd.Timestamp | None = None
+            gap: float | None = None
+            method: str = ""
 
-            imputed_r1 = _cap_date(r0 + pd.Timedelta(days=gap))
-            df.at[idx, "R1 Date (Final)"] = imputed_r1
-            df.at[idx, "R1 Source"] = "Imputed"
-            df.at[idx, "R1 Imputation Method"] = f"Imputed: R0 + {gap} days [{method}]"
-            df.at[idx, "R1 Imputation Days"] = gap
+            # Level 1 – same designation + skills + exact R0 date → median R1 date
+            k1 = (desig, skills, r0)
+            if pd.notna(r0) and k1 in lvl1_r1date:
+                candidate = _cap_date(lvl1_r1date[k1])
+                if pd.notna(candidate) and candidate >= r0:
+                    imputed_r1 = candidate
+                    method = (
+                        f"Predicted L1 (Designation+Skills+Date): "
+                        f"median R1 date for '{row['Current Designation']}' | '{row['Skills']}' | {r0_str}"
+                    )
+
+            # Level 2 – same designation + skills + R0 month → median R1 date
+            if imputed_r1 is None:
+                k2 = (desig, skills, r0_month)
+                if r0_month and k2 in lvl2_r1date:
+                    candidate = _cap_date(lvl2_r1date[k2])
+                    if pd.notna(candidate) and candidate >= r0:
+                        imputed_r1 = candidate
+                        method = (
+                            f"Predicted L2 (Designation+Skills+Month): "
+                            f"median R1 date for '{row['Current Designation']}' | '{row['Skills']}' | {r0_month}"
+                        )
+
+            # Level 3 – same designation + R0 month → median R1 date
+            if imputed_r1 is None:
+                k3 = (desig, r0_month)
+                if r0_month and k3 in lvl3_r1date:
+                    candidate = _cap_date(lvl3_r1date[k3])
+                    if pd.notna(candidate) and candidate >= r0:
+                        imputed_r1 = candidate
+                        method = (
+                            f"Predicted L3 (Designation+Month): "
+                            f"median R1 date for '{row['Current Designation']}' | {r0_month}"
+                        )
+
+            # Level 4 – same designation + skills → R0 + median gap
+            if imputed_r1 is None:
+                k4 = (desig, skills)
+                if k4 in lvl4_gap and pd.notna(r0):
+                    gap = lvl4_gap[k4]
+                    imputed_r1 = _cap_date(r0 + pd.Timedelta(days=int(round(gap))))
+                    method = (
+                        f"Predicted L4 (Designation+Skills gap): "
+                        f"R0 + {int(round(gap))} days "
+                        f"(median gap for '{row['Current Designation']}' | '{row['Skills']}')"
+                    )
+
+            # Level 5 – same designation → R0 + median gap
+            if imputed_r1 is None:
+                if desig in lvl5_gap and pd.notna(r0):
+                    gap = lvl5_gap[desig]
+                    imputed_r1 = _cap_date(r0 + pd.Timedelta(days=int(round(gap))))
+                    method = (
+                        f"Predicted L5 (Designation gap): "
+                        f"R0 + {int(round(gap))} days "
+                        f"(median gap for designation '{row['Current Designation']}')"
+                    )
+
+            # Level 6 – same skills → R0 + median gap
+            if imputed_r1 is None:
+                if skills in lvl6_gap and pd.notna(r0):
+                    gap = lvl6_gap[skills]
+                    imputed_r1 = _cap_date(r0 + pd.Timedelta(days=int(round(gap))))
+                    method = (
+                        f"Predicted L6 (Skills gap): "
+                        f"R0 + {int(round(gap))} days "
+                        f"(median gap for skills '{row['Skills']}')"
+                    )
+
+            # Level 7 – global fallback
+            if imputed_r1 is None and pd.notna(r0):
+                gap = global_median_gap
+                imputed_r1 = _cap_date(r0 + pd.Timedelta(days=int(round(gap))))
+                method = (
+                    f"Predicted L7 (Global fallback): "
+                    f"R0 + {int(round(gap))} days (global median gap)"
+                )
+
+            if imputed_r1 is not None:
+                used_gap = (
+                    int((imputed_r1 - r0).days)
+                    if pd.notna(r0) else (int(round(gap)) if gap is not None else 0)
+                )
+                df.at[idx, "R1 Date (Final)"] = imputed_r1
+                df.at[idx, "R1 Source"] = "Imputed"
+                df.at[idx, "R1 Imputation Method"] = f"Imputed: {method}"
+                df.at[idx, "R1 Imputation Days"] = used_gap
 
         if needs_r2 and st != "R1 Reject":
             r1 = df.at[idx, "R1 Date (Final)"]
